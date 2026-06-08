@@ -52,6 +52,28 @@ class PressureInstrument:
         except pyvisa.VisaIOError as exc:
             raise InstrumentError(f"Could not connect to {address!r}: {exc}") from exc
 
+    def list_candidate_resources(self) -> list[str]:
+        """Return VISA resources limited to USB and Ethernet transports."""
+        try:
+            resources = self._rm.list_resources()
+        except pyvisa.VisaIOError as exc:
+            raise InstrumentError(f"Could not list VISA resources: {exc}") from exc
+
+        candidates = []
+        for address in resources:
+            upper = address.upper()
+            if upper.startswith("USB") or upper.startswith("TCPIP"):
+                candidates.append(address)
+        return candidates
+
+    def find_recognized_resources(self) -> list[str]:
+        """Return resources that answer like a supported pressure controller."""
+        recognized: list[str] = []
+        for address in self.list_candidate_resources():
+            if self._looks_like_controller(address):
+                recognized.append(address)
+        return recognized
+
     def disconnect(self) -> None:
         """Close the VISA connection if open."""
         if self._resource is not None:
@@ -135,6 +157,23 @@ class PressureInstrument:
             logger.debug("Sent: %s", command)
         except pyvisa.VisaIOError as exc:
             raise InstrumentError(f"Write {command!r} failed: {exc}") from exc
+
+    def _looks_like_controller(self, address: str) -> bool:
+        """Probe an address with a mode query to identify compatible devices."""
+        resource: pyvisa.resources.Resource | None = None
+        try:
+            resource = self._rm.open_resource(address)
+            resource.timeout = INSTRUMENT_TIMEOUT_MS
+            raw = resource.query(CMD_QUERY_MODE).strip().upper()
+            return "MEAS" in raw or "CONT" in raw
+        except pyvisa.VisaIOError:
+            return False
+        finally:
+            if resource is not None:
+                try:
+                    resource.close()
+                except pyvisa.VisaIOError:
+                    logger.debug("Probe close failed for %s", address)
 
     def __del__(self) -> None:
         self.disconnect()

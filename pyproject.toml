@@ -8,6 +8,7 @@ dependencies = [
     "pyqt5>=5.15.11",
     "pyvisa>=1.16.2",
     "pyvisa-py>=0.8.1",
+    "zeroconf>=0.149.16",
 ]
 
 [project.scripts]

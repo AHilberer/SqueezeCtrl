@@ -8,8 +8,8 @@ from PyQt5.QtWidgets import (
     QDoubleSpinBox,
     QFrame,
     QHBoxLayout,
+    QInputDialog,
     QLabel,
-    QLineEdit,
     QMainWindow,
     QMessageBox,
     QPushButton,
@@ -84,16 +84,14 @@ class MainWindow(QMainWindow):
     def _build_connection_row(self) -> QHBoxLayout:
         layout = QHBoxLayout()
 
-        self._address_input = QLineEdit()
-        self._address_input.setPlaceholderText(
-            "Enter USB address (e.g., USB0::0x1234::0x5678::INSTR)"
-        )
+        self._connect_btn = QPushButton("Connect")
+        self._connect_btn.clicked.connect(self._on_connect)
 
-        connect_btn = QPushButton("Connect")
-        connect_btn.clicked.connect(self._on_connect)
+        self._connection_status = QLabel("Status: Disconnected")
 
-        layout.addWidget(self._address_input)
-        layout.addWidget(connect_btn)
+        layout.addWidget(self._connect_btn)
+        layout.addWidget(self._connection_status)
+        layout.addStretch()
         return layout
 
     def _build_mode_button(self) -> QPushButton:
@@ -233,8 +231,47 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
 
     def _on_connect(self) -> None:
-        address = self._address_input.text().strip()
+        if self._instrument.is_connected:
+            self._instrument.disconnect()
+            self._set_connected_state(False)
+            return
+
         try:
+            recognized = self._instrument.find_recognized_resources()
+
+            if len(recognized) == 1:
+                address = recognized[0]
+            else:
+                if recognized:
+                    selectable = recognized
+                else:
+                    selectable = self._instrument.list_candidate_resources()
+
+                if not selectable:
+                    QMessageBox.warning(
+                        self,
+                        "Discovery",
+                        "No USB or Ethernet device found.",
+                    )
+                    return
+
+                title = "Select Inflator"
+                label = (
+                    "Select the detected inflator:"
+                    if recognized
+                    else "No device was recognized automatically. Select a device:"
+                )
+                address, ok = QInputDialog.getItem(
+                    self,
+                    title,
+                    label,
+                    selectable,
+                    0,
+                    False,
+                )
+                if not ok or not address:
+                    return
+
             self._instrument.connect(address)
             self._set_connected_state(True)
             # Read initial mode from instrument
@@ -243,7 +280,7 @@ class MainWindow(QMainWindow):
                 self._apply_mode_ui(mode)
             except InstrumentError as exc:
                 logger.warning("Could not read initial mode: %s", exc)
-            QMessageBox.information(self, "Connection", "Connected successfully!")
+            self._connection_status.setText("Status: Connected")
         except InstrumentError as exc:
             logger.error("Connection failed: %s", exc)
             QMessageBox.critical(self, "Connection Error", str(exc))
@@ -306,6 +343,8 @@ class MainWindow(QMainWindow):
             self._poll_timer.start()
         else:
             self._poll_timer.stop()
+        self._connection_status.setText("Status: Connected" if connected else "Status: Disconnected")
+        self._connect_btn.setText("Disconnect" if connected else "Connect")
         self._mode_btn.setEnabled(connected)
         self._setpoint_input.setEnabled(connected)
         self._step_input.setEnabled(connected)
