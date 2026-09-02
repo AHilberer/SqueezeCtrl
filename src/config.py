@@ -7,12 +7,14 @@ INSTRUMENT_TIMEOUT_MS: int = 5000
 # broadcast, so this pre-fills the manual "Connect by IP" prompt.
 DEFAULT_INSTRUMENT_IP = "192.168.1.6"
 
-# SCPI commands
+# SCPI commands (verified against the GE Druck PACE Series SCPI manual, K0472)
 CMD_READ_PRESSURE = ":SENSe:PRESsure?"
 CMD_READ_RATE = ":SENSe:PRESsure:SLEW?"
-CMD_READ_SOURCE_PRESSURE = ":SOURce:PRESsure:COMPensate 1?"
-CMD_SET_PRESSURE = "SET:PRES"
-CMD_SET_RATE = "SET:RATE"
+# COMPensate takes the source index (1=+ve, 2=-ve) as a numeric suffix
+# directly on the mnemonic, not as a value before the '?'.
+CMD_READ_SOURCE_PRESSURE = ":SOURce:PRESsure:COMPensate1?"
+CMD_SET_PRESSURE = ":SOURce:PRESsure"
+CMD_SET_RATE = ":SOURce:PRESsure:SLEW"
 CMD_SET_SOURCE = ":SOUR"
 CMD_SET_OUTPUT = ":OUTP"
 CMD_QUERY_MODE = ":SYST:SET?"
