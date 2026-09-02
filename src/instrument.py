@@ -142,12 +142,20 @@ class PressureInstrument:
         resource = self._assert_connected()
         try:
             raw = resource.query(command)
-            return float(raw.strip())
         except pyvisa.VisaIOError as exc:
             raise InstrumentError(f"Query {command!r} failed: {exc}") from exc
+
+        # Responses echo the command mnemonic before the value, e.g.
+        # ":SENS:PRES 0.002774" — the value is always the last whitespace-
+        # separated token, whether or not an echo prefix is present.
+        tokens = raw.split()
+        if not tokens:
+            raise InstrumentError(f"Empty response to {command!r}")
+        try:
+            return float(tokens[-1])
         except ValueError as exc:
             raise InstrumentError(
-                f"Unexpected response to {command!r}: {exc}"
+                f"Unexpected response to {command!r}: {raw!r} ({exc})"
             ) from exc
 
     def _write(self, command: str) -> None:
