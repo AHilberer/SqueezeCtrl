@@ -2,8 +2,16 @@
 
 import logging
 
-from PyQt5.QtCore import Qt, QTimer
-from PyQt5.QtGui import QFont
+from PyQt5.QtCore import (
+    QEasingCurve,
+    QPropertyAnimation,
+    QRectF,
+    Qt,
+    QTimer,
+    pyqtProperty,
+    pyqtSignal,
+)
+from PyQt5.QtGui import QColor, QFont, QPainter
 from PyQt5.QtWidgets import (
     QDoubleSpinBox,
     QFrame,
@@ -51,6 +59,98 @@ class SteppedSpinBox(QDoubleSpinBox):
         self.editingFinished.emit()
 
 
+class ModeSwitch(QWidget):
+    """A fat pill-shaped switch between MEASURE (left) and CONTROL (right).
+
+    The thumb sits over whichever side is currently active, so the label
+    it covers is the current state and the label it's not covering is
+    what a click will switch to.
+    """
+
+    MEASURE_COLOR = QColor("#4a90d9")
+    CONTROL_COLOR = QColor("#e07b39")
+    TRACK_COLOR = QColor("#dce3e8")
+    DISABLED_COLOR = QColor("#aaaaaa")
+
+    clicked = pyqtSignal()
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._checked = False
+        self._offset = 0.0  # 0.0 = MEASURE (left), 1.0 = CONTROL (right)
+        self.setMinimumHeight(64)
+        self.setCursor(Qt.PointingHandCursor)
+
+        self._anim = QPropertyAnimation(self, b"offset", self)
+        self._anim.setDuration(150)
+        self._anim.setEasingCurve(QEasingCurve.OutCubic)
+
+    def isChecked(self) -> bool:
+        return self._checked
+
+    def setChecked(self, checked: bool, animate: bool = True) -> None:
+        self._checked = checked
+        target = 1.0 if checked else 0.0
+        self._anim.stop()
+        if animate:
+            self._anim.setStartValue(self._offset)
+            self._anim.setEndValue(target)
+            self._anim.start()
+        else:
+            self.offset = target
+
+    def _get_offset(self) -> float:
+        return self._offset
+
+    def _set_offset(self, value: float) -> None:
+        self._offset = value
+        self.update()
+
+    offset = pyqtProperty(float, _get_offset, _set_offset)
+
+    def mousePressEvent(self, event) -> None:  # type: ignore[override]
+        if self.isEnabled() and event.button() == Qt.LeftButton:
+            self.setChecked(not self._checked)
+            self.clicked.emit()
+
+    def paintEvent(self, event) -> None:  # type: ignore[override]
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+
+        rect = QRectF(self.rect().adjusted(1, 1, -1, -1))
+        radius = rect.height() / 2
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(self.TRACK_COLOR if self.isEnabled() else self.DISABLED_COLOR)
+        painter.drawRoundedRect(rect, radius, radius)
+
+        thumb_width = rect.width() / 2
+        thumb_rect = QRectF(
+            rect.x() + self._offset * (rect.width() - thumb_width),
+            rect.y(),
+            thumb_width,
+            rect.height(),
+        )
+        thumb_color = self.CONTROL_COLOR if self._checked else self.MEASURE_COLOR
+        painter.setBrush(thumb_color if self.isEnabled() else self.DISABLED_COLOR)
+        painter.drawRoundedRect(thumb_rect, radius, radius)
+
+        font = QFont(self.font())
+        font.setPointSize(14)
+        font.setBold(True)
+        painter.setFont(font)
+
+        left_rect = QRectF(rect.x(), rect.y(), thumb_width, rect.height())
+        right_rect = QRectF(rect.x() + thumb_width, rect.y(), thumb_width, rect.height())
+
+        active_text = QColor("white")
+        inactive_text = QColor("#607d8b") if self.isEnabled() else QColor("#888888")
+
+        painter.setPen(inactive_text if self._checked else active_text)
+        painter.drawText(left_rect, Qt.AlignCenter, "MEASURE")
+        painter.setPen(active_text if self._checked else inactive_text)
+        painter.drawText(right_rect, Qt.AlignCenter, "CONTROL")
+
+
 class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
@@ -72,7 +172,7 @@ class MainWindow(QMainWindow):
         root.setSpacing(12)
 
         root.addLayout(self._build_connection_row())
-        root.addWidget(self._build_mode_button())
+        root.addWidget(self._build_mode_switch())
         root.addWidget(self._build_readout_section())
         root.addLayout(self._build_setpoint_section())
         root.addLayout(self._build_slew_section())
@@ -94,32 +194,11 @@ class MainWindow(QMainWindow):
         layout.addStretch()
         return layout
 
-    def _build_mode_button(self) -> QPushButton:
-        self._mode_btn = QPushButton("MEASURE")
-        self._mode_btn.setEnabled(False)
-        self._mode_btn.setCheckable(True)
-        self._mode_btn.setMinimumHeight(56)
-
-        btn_font = QFont()
-        btn_font.setPointSize(16)
-        btn_font.setBold(True)
-        self._mode_btn.setFont(btn_font)
-
-        self._mode_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #4a90d9;
-                color: white;
-                border-radius: 8px;
-            }
-            QPushButton:checked {
-                background-color: #e07b39;
-            }
-            QPushButton:disabled {
-                background-color: #aaaaaa;
-            }
-        """)
-        self._mode_btn.clicked.connect(self._on_toggle_mode)
-        return self._mode_btn
+    def _build_mode_switch(self) -> ModeSwitch:
+        self._mode_switch = ModeSwitch()
+        self._mode_switch.setEnabled(False)
+        self._mode_switch.clicked.connect(self._on_toggle_mode)
+        return self._mode_switch
 
     def _build_readout_section(self) -> QFrame:
         frame = QFrame()
@@ -286,8 +365,8 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "Connection Error", str(exc))
 
     def _on_toggle_mode(self) -> None:
-        # Button is checkable: checked = CONTROL, unchecked = MEASURE
-        want_control = self._mode_btn.isChecked()
+        # Switch already flipped itself on click: checked = CONTROL, unchecked = MEASURE
+        want_control = self._mode_switch.isChecked()
         try:
             if want_control:
                 self._instrument.set_control(self._setpoint_input.value())
@@ -298,13 +377,12 @@ class MainWindow(QMainWindow):
         except InstrumentError as exc:
             logger.error("Mode switch failed: %s", exc)
             QMessageBox.critical(self, "Mode Error", str(exc))
-            # Revert button state
-            self._mode_btn.setChecked(not want_control)
+            # Revert switch state
+            self._mode_switch.setChecked(not want_control)
 
     def _apply_mode_ui(self, mode: ControlMode) -> None:
         is_control = mode is ControlMode.CONTROL
-        self._mode_btn.setChecked(is_control)
-        self._mode_btn.setText("CONTROL" if is_control else "MEASURE")
+        self._mode_switch.setChecked(is_control)
         if not is_control:
             self._pressure_label.setStyleSheet("")
 
@@ -345,14 +423,14 @@ class MainWindow(QMainWindow):
             self._poll_timer.stop()
         self._connection_status.setText("Status: Connected" if connected else "Status: Disconnected")
         self._connect_btn.setText("Disconnect" if connected else "Connect")
-        self._mode_btn.setEnabled(connected)
+        self._mode_switch.setEnabled(connected)
         self._setpoint_input.setEnabled(connected)
         self._step_input.setEnabled(connected)
         self._slew_input.setEnabled(connected)
 
     def _update_pressure_color(self, pressure: float) -> None:
         """Colour the pressure label based on proximity to setpoint (control mode only)."""
-        is_control = self._mode_btn.isChecked()
+        is_control = self._mode_switch.isChecked()
         if not is_control:
             self._pressure_label.setStyleSheet("")
             return
