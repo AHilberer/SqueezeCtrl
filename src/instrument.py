@@ -1,6 +1,7 @@
 """VISA instrument abstraction for the pressure controller."""
 
 import logging
+import threading
 from enum import Enum
 
 import pyvisa
@@ -34,6 +35,10 @@ class PressureInstrument:
     def __init__(self) -> None:
         self._rm = pyvisa.ResourceManager()
         self._resource: pyvisa.resources.Resource | None = None
+        # Serializes access to _resource: the UI thread issues writes (setpoint
+        # edits, mode changes) while a background thread polls readings, and
+        # pyvisa resources aren't safe for concurrent use from multiple threads.
+        self._io_lock = threading.Lock()
 
     @property
     def is_connected(self) -> bool:
@@ -77,7 +82,8 @@ class PressureInstrument:
         """Close the VISA connection if open."""
         if self._resource is not None:
             try:
-                self._resource.close()
+                with self._io_lock:
+                    self._resource.close()
                 logger.info("Instrument disconnected.")
             except pyvisa.VisaIOError as exc:
                 logger.warning("Error while closing instrument: %s", exc)
@@ -100,7 +106,8 @@ class PressureInstrument:
         """Query the current operating mode (MEASURE or CONTROL)."""
         resource = self._assert_connected()
         try:
-            raw = resource.query(CMD_QUERY_MODE).strip()
+            with self._io_lock:
+                raw = resource.query(CMD_QUERY_MODE).strip()
             # Response format: ":SYST:SET MEAS, 0.0" or ":SYST:SET CONT, 100.0"
             upper = raw.upper()
             if "CONT" in upper:
@@ -140,7 +147,8 @@ class PressureInstrument:
     def _query_float(self, command: str) -> float:
         resource = self._assert_connected()
         try:
-            raw = resource.query(command)
+            with self._io_lock:
+                raw = resource.query(command)
         except pyvisa.VisaIOError as exc:
             raise InstrumentError(f"Query {command!r} failed: {exc}") from exc
 
@@ -160,7 +168,8 @@ class PressureInstrument:
     def _write(self, command: str) -> None:
         resource = self._assert_connected()
         try:
-            resource.write(command)
+            with self._io_lock:
+                resource.write(command)
             logger.debug("Sent: %s", command)
         except pyvisa.VisaIOError as exc:
             raise InstrumentError(f"Write {command!r} failed: {exc}") from exc

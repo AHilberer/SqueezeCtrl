@@ -4,9 +4,11 @@ import logging
 
 from PyQt5.QtCore import (
     QEasingCurve,
+    QObject,
     QPropertyAnimation,
     QRectF,
     Qt,
+    QThread,
     QTimer,
     pyqtProperty,
     pyqtSignal,
@@ -154,6 +156,45 @@ class ModeSwitch(QWidget):
         painter.drawText(right_rect, Qt.AlignCenter, "CONTROL")
 
 
+class PollWorker(QObject):
+    """Polls the instrument on a background thread.
+
+    Each poll does three blocking VISA round-trips; running them on the GUI
+    thread froze all UI event processing (hover highlights, repaints, ...)
+    for that duration. The timer is created inside start() so it's driven by
+    this worker's own thread's event loop once moved there.
+    """
+
+    reading = pyqtSignal(float, float, float)
+    poll_error = pyqtSignal(str)
+
+    def __init__(self, instrument: PressureInstrument, interval_ms: int) -> None:
+        super().__init__()
+        self._instrument = instrument
+        self._interval_ms = interval_ms
+        self._timer: QTimer | None = None
+
+    def start(self) -> None:
+        if self._timer is None:
+            self._timer = QTimer()
+            self._timer.setInterval(self._interval_ms)
+            self._timer.timeout.connect(self._poll)
+            # Stop the timer from its own thread as that thread shuts down,
+            # so Qt never has to kill it from the main thread during cleanup.
+            self.thread().finished.connect(self._timer.stop)
+        self._timer.start()
+
+    def _poll(self) -> None:
+        try:
+            pressure = self._instrument.read_pressure()
+            rate = self._instrument.read_rate()
+            source = self._instrument.read_source_pressure()
+        except InstrumentError as exc:
+            self.poll_error.emit(str(exc))
+            return
+        self.reading.emit(pressure, rate, source)
+
+
 class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
@@ -161,9 +202,14 @@ class MainWindow(QMainWindow):
         self.setGeometry(*WINDOW_GEOMETRY)
 
         self._instrument = PressureInstrument()
-        self._poll_timer = QTimer(self)
-        self._poll_timer.setInterval(POLL_INTERVAL_MS)
-        self._poll_timer.timeout.connect(self._on_refresh)
+
+        self._poll_thread = QThread(self)
+        self._poll_worker = PollWorker(self._instrument, POLL_INTERVAL_MS)
+        self._poll_worker.moveToThread(self._poll_thread)
+        self._poll_thread.started.connect(self._poll_worker.start)
+        self._poll_worker.reading.connect(self._on_reading)
+        self._poll_worker.poll_error.connect(self._on_poll_error)
+
         self._build_ui()
 
     # ------------------------------------------------------------------
@@ -376,8 +422,8 @@ class MainWindow(QMainWindow):
 
     def _on_connect(self) -> None:
         if self._instrument.is_connected:
-            self._instrument.disconnect()
             self._set_connected_state(False)
+            self._instrument.disconnect()
             return
 
         try:
@@ -459,17 +505,14 @@ class MainWindow(QMainWindow):
         if not is_control:
             self._pressure_label.setStyleSheet("")
 
-    def _on_refresh(self) -> None:
-        try:
-            pressure = self._instrument.read_pressure()
-            rate = self._instrument.read_rate()
-            source = self._instrument.read_source_pressure()
-            self._pressure_label.setText(f"{pressure:.{READOUT_DECIMALS}f}")
-            self._rate_label.setText(f"{rate:.{READOUT_DECIMALS}f}")
-            self._source_pressure_label.setText(f"{source:.{READOUT_DECIMALS}f}")
-            self._update_pressure_color(pressure)
-        except InstrumentError as exc:
-            logger.warning("Poll failed: %s", exc)
+    def _on_reading(self, pressure: float, rate: float, source: float) -> None:
+        self._pressure_label.setText(f"{pressure:.{READOUT_DECIMALS}f}")
+        self._rate_label.setText(f"{rate:.{READOUT_DECIMALS}f}")
+        self._source_pressure_label.setText(f"{source:.{READOUT_DECIMALS}f}")
+        self._update_pressure_color(pressure)
+
+    def _on_poll_error(self, message: str) -> None:
+        logger.warning("Poll failed: %s", message)
 
     def _on_send_setpoint(self) -> None:
         try:
@@ -491,9 +534,10 @@ class MainWindow(QMainWindow):
 
     def _set_connected_state(self, connected: bool) -> None:
         if connected:
-            self._poll_timer.start()
+            self._poll_thread.start()
         else:
-            self._poll_timer.stop()
+            self._poll_thread.quit()
+            self._poll_thread.wait()
         self._connection_status.setText("Status: Connected" if connected else "Status: Disconnected")
         self._connect_btn.setText("Disconnect" if connected else "Connect")
         self._mode_switch.setEnabled(connected)
@@ -514,6 +558,9 @@ class MainWindow(QMainWindow):
         self._pressure_label.setStyleSheet(f"color: {color};")
 
     def closeEvent(self, event) -> None:  # type: ignore[override]
+        if self._poll_thread.isRunning():
+            self._poll_thread.quit()
+            self._poll_thread.wait()
         self._instrument.disconnect()
         event.accept()
 
