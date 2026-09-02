@@ -11,7 +11,7 @@ dependencies = [
 ]
 
 [project.scripts]
-pressure-controller = "main:main"
+SqueezeCtrl = "main:main"
 
 [build-system]
 requires = ["hatchling"]
