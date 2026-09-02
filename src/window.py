@@ -51,8 +51,21 @@ from .instrument import ControlMode, InstrumentError, PressureInstrument
 logger = logging.getLogger(__name__)
 
 
-class SteppedSpinBox(QDoubleSpinBox):
-    """QDoubleSpinBox whose arrow step is driven by an external step spinbox."""
+class ImmediateSpinBox(QDoubleSpinBox):
+    """QDoubleSpinBox that emits editingFinished right after an arrow-button step.
+
+    QAbstractSpinBox's editingFinished only fires on Enter or focus loss, so
+    without this, clicking the step arrows wouldn't push the new value to
+    the instrument until the user tabbed away.
+    """
+
+    def stepBy(self, steps: int) -> None:
+        super().stepBy(steps)
+        self.editingFinished.emit()
+
+
+class SteppedSpinBox(ImmediateSpinBox):
+    """ImmediateSpinBox whose arrow step is driven by an external step spinbox."""
 
     def __init__(self, step_source: QDoubleSpinBox, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -282,7 +295,7 @@ class MainWindow(QMainWindow):
         )
 
     def _build_slew_card(self) -> QFrame:
-        self._slew_input = QDoubleSpinBox()
+        self._slew_input = ImmediateSpinBox()
         self._slew_input.setDecimals(SLEW_DECIMALS)
         self._slew_input.setRange(SLEW_MIN, SLEW_MAX)
         self._slew_input.setValue(SLEW_DEFAULT)
@@ -386,16 +399,6 @@ class MainWindow(QMainWindow):
         layout.addWidget(step_title)
         layout.addWidget(self._step_input)
         layout.addWidget(step_unit)
-
-        layout.addSpacing(8)
-        self._setpoint_down_btn = QPushButton("▼")
-        self._setpoint_up_btn = QPushButton("▲")
-        for btn, steps in ((self._setpoint_down_btn, -1), (self._setpoint_up_btn, 1)):
-            btn.setFixedSize(28, 28)
-            btn.setEnabled(False)
-            btn.setToolTip("Step the setpoint by the step size above")
-            btn.clicked.connect(lambda _checked, s=steps: self._setpoint_input.stepBy(s))
-            layout.addWidget(btn)
 
         layout.addStretch()
 
@@ -544,8 +547,6 @@ class MainWindow(QMainWindow):
         self._setpoint_input.setEnabled(connected)
         self._step_input.setEnabled(connected)
         self._slew_input.setEnabled(connected)
-        self._setpoint_down_btn.setEnabled(connected)
-        self._setpoint_up_btn.setEnabled(connected)
 
     def _update_pressure_color(self, pressure: float) -> None:
         """Colour the pressure label based on proximity to setpoint (control mode only)."""
