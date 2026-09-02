@@ -171,11 +171,18 @@ class MainWindow(QMainWindow):
         root = QVBoxLayout()
         root.setSpacing(12)
 
+        self._step_input = self._build_step_input()
+
         root.addLayout(self._build_connection_row())
         root.addWidget(self._build_mode_switch())
-        root.addWidget(self._build_readout_section())
-        root.addLayout(self._build_setpoint_section())
-        root.addLayout(self._build_slew_section())
+
+        cards_row = QHBoxLayout()
+        cards_row.setSpacing(16)
+        cards_row.addWidget(self._build_pressure_card())
+        cards_row.addWidget(self._build_slew_card())
+        root.addLayout(cards_row)
+
+        root.addLayout(self._build_secondary_row())
 
         container = QWidget()
         container.setLayout(root)
@@ -200,77 +207,15 @@ class MainWindow(QMainWindow):
         self._mode_switch.clicked.connect(self._on_toggle_mode)
         return self._mode_switch
 
-    def _build_readout_section(self) -> QFrame:
-        frame = QFrame()
-        frame.setFrameShape(QFrame.StyledPanel)
-        frame.setFrameShadow(QFrame.Sunken)
+    def _build_step_input(self) -> QDoubleSpinBox:
+        step_input = QDoubleSpinBox()
+        step_input.setDecimals(SETPOINT_DECIMALS)
+        step_input.setRange(0.0001, SETPOINT_MAX)
+        step_input.setValue(SETPOINT_STEP_DEFAULT)
+        step_input.setEnabled(False)
+        return step_input
 
-        big_font = QFont()
-        big_font.setPointSize(22)
-        big_font.setBold(True)
-
-        unit_font = QFont()
-        unit_font.setPointSize(12)
-
-        layout = QHBoxLayout(frame)
-        layout.setSpacing(32)
-
-        for attr, title, unit in (
-            ("_pressure_label", "Pressure", UNIT_PRESSURE),
-            ("_rate_label", "Rate", UNIT_RATE),
-        ):
-            col = QVBoxLayout()
-            col.setAlignment(Qt.AlignCenter)
-
-            title_lbl = QLabel(title)
-            title_lbl.setAlignment(Qt.AlignCenter)
-
-            value_lbl = QLabel("—")
-            value_lbl.setFont(big_font)
-            value_lbl.setAlignment(Qt.AlignCenter)
-            setattr(self, attr, value_lbl)
-
-            unit_lbl = QLabel(unit)
-            unit_lbl.setFont(unit_font)
-            unit_lbl.setAlignment(Qt.AlignCenter)
-
-            col.addWidget(title_lbl)
-            col.addWidget(value_lbl)
-            col.addWidget(unit_lbl)
-            layout.addLayout(col)
-
-        # Secondary readout — positive source pressure
-        layout.addSpacing(16)
-        src_col = QVBoxLayout()
-        src_col.setAlignment(Qt.AlignCenter)
-
-        src_title = QLabel("Source Pressure")
-        src_title.setAlignment(Qt.AlignCenter)
-
-        self._source_pressure_label = QLabel("—")
-        src_font = QFont()
-        src_font.setPointSize(14)
-        self._source_pressure_label.setFont(src_font)
-        self._source_pressure_label.setAlignment(Qt.AlignCenter)
-
-        src_unit = QLabel(UNIT_PRESSURE)
-        src_unit.setAlignment(Qt.AlignCenter)
-
-        src_col.addWidget(src_title)
-        src_col.addWidget(self._source_pressure_label)
-        src_col.addWidget(src_unit)
-        layout.addLayout(src_col)
-
-        return frame
-
-    def _build_setpoint_section(self) -> QHBoxLayout:
-        layout = QHBoxLayout()
-
-        self._step_input = QDoubleSpinBox()
-        self._step_input.setDecimals(SETPOINT_DECIMALS)
-        self._step_input.setRange(0.0001, SETPOINT_MAX)
-        self._step_input.setValue(SETPOINT_STEP_DEFAULT)
-
+    def _build_pressure_card(self) -> QFrame:
         self._setpoint_input = SteppedSpinBox(step_source=self._step_input)
         self._setpoint_input.setDecimals(SETPOINT_DECIMALS)
         self._setpoint_input.setRange(SETPOINT_MIN, SETPOINT_MAX)
@@ -278,20 +223,16 @@ class MainWindow(QMainWindow):
         self._setpoint_input.setEnabled(False)
         self._setpoint_input.editingFinished.connect(self._on_send_setpoint)
 
-        self._step_input.setEnabled(False)
+        return self._build_pair_card(
+            title="Pressure",
+            left_title="Setpoint",
+            left_widget=self._setpoint_input,
+            right_title="Current",
+            right_attr="_pressure_label",
+            unit=UNIT_PRESSURE,
+        )
 
-        layout.addWidget(QLabel("Set-Point Pressure:"))
-        layout.addWidget(self._setpoint_input)
-        layout.addWidget(QLabel(UNIT_PRESSURE))
-        layout.addSpacing(16)
-        layout.addWidget(QLabel("Step:"))
-        layout.addWidget(self._step_input)
-        layout.addWidget(QLabel(UNIT_PRESSURE))
-        return layout
-
-    def _build_slew_section(self) -> QHBoxLayout:
-        layout = QHBoxLayout()
-
+    def _build_slew_card(self) -> QFrame:
         self._slew_input = QDoubleSpinBox()
         self._slew_input.setDecimals(SLEW_DECIMALS)
         self._slew_input.setRange(SLEW_MIN, SLEW_MAX)
@@ -299,10 +240,125 @@ class MainWindow(QMainWindow):
         self._slew_input.setEnabled(False)
         self._slew_input.editingFinished.connect(self._on_send_slew)
 
-        layout.addWidget(QLabel("Slew Rate:"))
-        layout.addWidget(self._slew_input)
-        layout.addWidget(QLabel(UNIT_RATE))
+        return self._build_pair_card(
+            title="Slew Rate",
+            left_title="Aim",
+            left_widget=self._slew_input,
+            right_title="Current",
+            right_attr="_rate_label",
+            unit=UNIT_RATE,
+        )
+
+    def _build_pair_card(
+        self,
+        title: str,
+        left_title: str,
+        left_widget: QDoubleSpinBox,
+        right_title: str,
+        right_attr: str,
+        unit: str,
+    ) -> QFrame:
+        """A card pairing an editable target value with its live readout, at equal visual weight."""
+        frame = QFrame()
+        frame.setFrameShape(QFrame.StyledPanel)
+        frame.setFrameShadow(QFrame.Sunken)
+
+        header_font = QFont()
+        header_font.setPointSize(11)
+        header_font.setBold(True)
+
+        sub_font = QFont()
+        sub_font.setPointSize(10)
+
+        big_font = QFont()
+        big_font.setPointSize(22)
+        big_font.setBold(True)
+
+        outer = QVBoxLayout(frame)
+        outer.setSpacing(8)
+
+        header = QLabel(title)
+        header.setFont(header_font)
+        header.setAlignment(Qt.AlignCenter)
+        outer.addWidget(header)
+
+        row = QHBoxLayout()
+        row.setSpacing(12)
+
+        left_col = QVBoxLayout()
+        left_col.setAlignment(Qt.AlignCenter)
+        left_lbl = QLabel(left_title)
+        left_lbl.setFont(sub_font)
+        left_lbl.setAlignment(Qt.AlignCenter)
+        left_widget.setFont(big_font)
+        left_widget.setAlignment(Qt.AlignCenter)
+        left_col.addWidget(left_lbl)
+        left_col.addWidget(left_widget)
+        row.addLayout(left_col)
+
+        right_col = QVBoxLayout()
+        right_col.setAlignment(Qt.AlignCenter)
+        right_lbl = QLabel(right_title)
+        right_lbl.setFont(sub_font)
+        right_lbl.setAlignment(Qt.AlignCenter)
+        value_lbl = QLabel("—")
+        value_lbl.setFont(big_font)
+        value_lbl.setAlignment(Qt.AlignCenter)
+        value_lbl.setMinimumWidth(100)
+        setattr(self, right_attr, value_lbl)
+        right_col.addWidget(right_lbl)
+        right_col.addWidget(value_lbl)
+        row.addLayout(right_col)
+
+        outer.addLayout(row)
+
+        unit_lbl = QLabel(unit)
+        unit_lbl.setFont(sub_font)
+        unit_lbl.setAlignment(Qt.AlignCenter)
+        outer.addWidget(unit_lbl)
+
+        return frame
+
+    def _build_secondary_row(self) -> QHBoxLayout:
+        """Lower-emphasis controls: source pressure readout and the setpoint step size."""
+        layout = QHBoxLayout()
+        layout.setSpacing(24)
+
+        sub_font = QFont()
+        sub_font.setPointSize(10)
+
+        step_title = QLabel("Setpoint Step:")
+        step_title.setFont(sub_font)
+        step_unit = QLabel(UNIT_PRESSURE)
+        step_unit.setFont(sub_font)
+
+        layout.addWidget(step_title)
+        layout.addWidget(self._step_input)
+        layout.addWidget(step_unit)
+
+        layout.addSpacing(8)
+        self._setpoint_down_btn = QPushButton("▼")
+        self._setpoint_up_btn = QPushButton("▲")
+        for btn, steps in ((self._setpoint_down_btn, -1), (self._setpoint_up_btn, 1)):
+            btn.setFixedSize(28, 28)
+            btn.setEnabled(False)
+            btn.setToolTip("Step the setpoint by the step size above")
+            btn.clicked.connect(lambda _checked, s=steps: self._setpoint_input.stepBy(s))
+            layout.addWidget(btn)
+
         layout.addStretch()
+
+        src_title = QLabel("Source Pressure:")
+        src_title.setFont(sub_font)
+        self._source_pressure_label = QLabel("—")
+        self._source_pressure_label.setFont(sub_font)
+        src_unit = QLabel(UNIT_PRESSURE)
+        src_unit.setFont(sub_font)
+
+        layout.addWidget(src_title)
+        layout.addWidget(self._source_pressure_label)
+        layout.addWidget(src_unit)
+
         return layout
 
     # ------------------------------------------------------------------
@@ -427,6 +483,8 @@ class MainWindow(QMainWindow):
         self._setpoint_input.setEnabled(connected)
         self._step_input.setEnabled(connected)
         self._slew_input.setEnabled(connected)
+        self._setpoint_down_btn.setEnabled(connected)
+        self._setpoint_up_btn.setEnabled(connected)
 
     def _update_pressure_color(self, pressure: float) -> None:
         """Colour the pressure label based on proximity to setpoint (control mode only)."""

@@ -14,8 +14,8 @@ CMD_SET_OUTPUT = ":OUTP"
 CMD_QUERY_MODE = ":SYST:SET?"
 
 # Units
-UNIT_PRESSURE = "Bar"
-UNIT_RATE = "Bar/min"
+UNIT_PRESSURE = "bar"
+UNIT_RATE = "bar/min"
 
 # Spinbox defaults
 SETPOINT_DEFAULT = 0.0
@@ -31,6 +31,6 @@ SLEW_DECIMALS = 3
 
 # UI
 WINDOW_TITLE = "Pressure Controller"
-WINDOW_GEOMETRY = (300, 300, 500, 320)  # x, y, w, h
+WINDOW_GEOMETRY = (300, 300, 680, 380)  # x, y, w, h
 
 SETPOINT_TOLERANCE_BAR = 0.02
