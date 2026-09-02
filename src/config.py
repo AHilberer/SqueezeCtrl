@@ -2,6 +2,7 @@
 
 # VISA / instrument
 INSTRUMENT_TIMEOUT_MS: int = 5000
+POLL_INTERVAL_MS: int = 250
 
 # Ethernet fallback: static-IP instruments often don't answer VISA's discovery
 # broadcast, so this pre-fills the manual "Connect by IP" prompt.
@@ -15,7 +16,6 @@ CMD_READ_RATE = ":SENSe:PRESsure:SLEW?"
 CMD_READ_SOURCE_PRESSURE = ":SOURce:PRESsure:COMPensate1?"
 CMD_SET_PRESSURE = ":SOURce:PRESsure"
 CMD_SET_RATE = ":SOURce:PRESsure:SLEW"
-CMD_SET_SOURCE = ":SOUR"
 CMD_SET_OUTPUT = ":OUTP"
 CMD_QUERY_MODE = ":SYST:SET?"
 
@@ -40,3 +40,7 @@ WINDOW_TITLE = "Pressure Controller"
 WINDOW_GEOMETRY = (300, 300, 680, 380)  # x, y, w, h
 
 SETPOINT_TOLERANCE_BAR = 0.02
+
+# Live readouts are formatted to this many decimal places so the UI doesn't
+# jitter as the instrument returns varying-precision values.
+READOUT_DECIMALS = 3

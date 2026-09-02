@@ -11,7 +11,7 @@ from PyQt5.QtCore import (
     pyqtProperty,
     pyqtSignal,
 )
-from PyQt5.QtGui import QColor, QFont, QPainter
+from PyQt5.QtGui import QColor, QFont, QFontMetrics, QPainter
 from PyQt5.QtWidgets import (
     QDoubleSpinBox,
     QFrame,
@@ -27,6 +27,8 @@ from PyQt5.QtWidgets import (
 
 from .config import (
     DEFAULT_INSTRUMENT_IP,
+    POLL_INTERVAL_MS,
+    READOUT_DECIMALS,
     SETPOINT_DECIMALS,
     SETPOINT_DEFAULT,
     SETPOINT_MAX,
@@ -160,7 +162,7 @@ class MainWindow(QMainWindow):
 
         self._instrument = PressureInstrument()
         self._poll_timer = QTimer(self)
-        self._poll_timer.setInterval(200)
+        self._poll_timer.setInterval(POLL_INTERVAL_MS)
         self._poll_timer.timeout.connect(self._on_refresh)
         self._build_ui()
 
@@ -305,7 +307,9 @@ class MainWindow(QMainWindow):
         value_lbl = QLabel("—")
         value_lbl.setFont(big_font)
         value_lbl.setAlignment(Qt.AlignCenter)
-        value_lbl.setMinimumWidth(100)
+        # Fixed width (sized for the worst-case digit count) so the card
+        # doesn't reflow as the reading's magnitude/sign changes.
+        value_lbl.setFixedWidth(QFontMetrics(big_font).horizontalAdvance("-1000.000"))
         setattr(self, right_attr, value_lbl)
         right_col.addWidget(right_lbl)
         right_col.addWidget(value_lbl)
@@ -353,6 +357,10 @@ class MainWindow(QMainWindow):
         src_title.setFont(sub_font)
         self._source_pressure_label = QLabel("—")
         self._source_pressure_label.setFont(sub_font)
+        self._source_pressure_label.setAlignment(Qt.AlignCenter)
+        self._source_pressure_label.setFixedWidth(
+            QFontMetrics(sub_font).horizontalAdvance("-1000.000")
+        )
         src_unit = QLabel(UNIT_PRESSURE)
         src_unit.setFont(sub_font)
 
@@ -456,9 +464,9 @@ class MainWindow(QMainWindow):
             pressure = self._instrument.read_pressure()
             rate = self._instrument.read_rate()
             source = self._instrument.read_source_pressure()
-            self._pressure_label.setText(str(pressure))
-            self._rate_label.setText(str(rate))
-            self._source_pressure_label.setText(str(source))
+            self._pressure_label.setText(f"{pressure:.{READOUT_DECIMALS}f}")
+            self._rate_label.setText(f"{rate:.{READOUT_DECIMALS}f}")
+            self._source_pressure_label.setText(f"{source:.{READOUT_DECIMALS}f}")
             self._update_pressure_color(pressure)
         except InstrumentError as exc:
             logger.warning("Poll failed: %s", exc)

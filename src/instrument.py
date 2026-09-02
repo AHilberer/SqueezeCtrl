@@ -13,7 +13,6 @@ from .config import (
     CMD_SET_OUTPUT,
     CMD_SET_PRESSURE,
     CMD_SET_RATE,
-    CMD_SET_SOURCE,
     INSTRUMENT_TIMEOUT_MS,
 )
 
@@ -112,7 +111,7 @@ class PressureInstrument:
 
     def set_control(self, setpoint: float) -> None:
         """Switch to control mode with the given setpoint (Bar)."""
-        self._write(f"{CMD_SET_SOURCE} {setpoint}")
+        self._write(f"{CMD_SET_PRESSURE} {setpoint}")
         self._write(f"{CMD_SET_OUTPUT} 1")
         logger.info("Switched to CONTROL mode, setpoint=%.4f", setpoint)
 
