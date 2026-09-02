@@ -3,6 +3,10 @@
 # VISA / instrument
 INSTRUMENT_TIMEOUT_MS: int = 5000
 
+# Ethernet fallback: static-IP instruments often don't answer VISA's discovery
+# broadcast, so this pre-fills the manual "Connect by IP" prompt.
+DEFAULT_INSTRUMENT_IP = "192.168.1.6"
+
 # SCPI commands
 CMD_READ_PRESSURE = ":SENSe:PRESsure?"
 CMD_READ_RATE = ":SENSe:PRESsure:SLEW?"

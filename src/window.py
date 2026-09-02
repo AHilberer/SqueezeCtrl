@@ -26,6 +26,7 @@ from PyQt5.QtWidgets import (
 )
 
 from .config import (
+    DEFAULT_INSTRUMENT_IP,
     SETPOINT_DECIMALS,
     SETPOINT_DEFAULT,
     SETPOINT_MAX,
@@ -372,40 +373,9 @@ class MainWindow(QMainWindow):
             return
 
         try:
-            recognized = self._instrument.find_recognized_resources()
-
-            if len(recognized) == 1:
-                address = recognized[0]
-            else:
-                if recognized:
-                    selectable = recognized
-                else:
-                    selectable = self._instrument.list_candidate_resources()
-
-                if not selectable:
-                    QMessageBox.warning(
-                        self,
-                        "Discovery",
-                        "No USB or Ethernet device found.",
-                    )
-                    return
-
-                title = "Select Inflator"
-                label = (
-                    "Select the detected inflator:"
-                    if recognized
-                    else "No device was recognized automatically. Select a device:"
-                )
-                address, ok = QInputDialog.getItem(
-                    self,
-                    title,
-                    label,
-                    selectable,
-                    0,
-                    False,
-                )
-                if not ok or not address:
-                    return
+            address = self._resolve_address()
+            if address is None:
+                return
 
             self._instrument.connect(address)
             self._set_connected_state(True)
@@ -419,6 +389,45 @@ class MainWindow(QMainWindow):
         except InstrumentError as exc:
             logger.error("Connection failed: %s", exc)
             QMessageBox.critical(self, "Connection Error", str(exc))
+
+    def _resolve_address(self) -> str | None:
+        """Pick the VISA address to connect to: an auto-recognized instrument,
+        a user's pick among discovered candidates, or — if nothing answers
+        discovery, as is common for static-IP Ethernet instruments — a
+        manually entered IP address.
+        """
+        recognized = self._instrument.find_recognized_resources()
+        if len(recognized) == 1:
+            return recognized[0]
+
+        selectable = recognized or self._instrument.list_candidate_resources()
+
+        if not selectable:
+            return self._prompt_manual_address()
+
+        title = "Select Inflator"
+        label = (
+            "Select the detected inflator:"
+            if recognized
+            else "No device was recognized automatically. Select a device:"
+        )
+        address, ok = QInputDialog.getItem(self, title, label, selectable, 0, False)
+        return address if ok and address else None
+
+    def _prompt_manual_address(self) -> str | None:
+        """Ask for an instrument IP address directly, for Ethernet instruments
+        that don't respond to VISA's discovery broadcast.
+        """
+        ip, ok = QInputDialog.getText(
+            self,
+            "Connect by IP",
+            "No USB or Ethernet device found automatically.\n"
+            "Enter the instrument's IP address:",
+            text=DEFAULT_INSTRUMENT_IP,
+        )
+        if not ok or not ip.strip():
+            return None
+        return f"TCPIP::{ip.strip()}::INSTR"
 
     def _on_toggle_mode(self) -> None:
         # Switch already flipped itself on click: checked = CONTROL, unchecked = MEASURE
