@@ -3,6 +3,8 @@
 A small PyQt5 desktop app for controlling a GE Druck PACE Series pressure
 controller over VISA/SCPI (USB or Ethernet).
 
+![SqueezeCtrl](docs/screenshot.png)
+
 ## Features
 
 - Switch between MEASURE and CONTROL mode
