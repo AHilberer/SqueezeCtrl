@@ -33,7 +33,10 @@ class PressureInstrument:
     """Wraps a pyvisa resource for a SCPI-based pressure controller."""
 
     def __init__(self) -> None:
-        self._rm = pyvisa.ResourceManager()
+        # "@py" selects pyvisa's pure-Python backend so the app doesn't
+        # depend on a vendor VISA runtime (NI-VISA, Keysight IO Libraries,
+        # ...) being separately installed on the machine it runs on.
+        self._rm = pyvisa.ResourceManager("@py")
         self._resource: pyvisa.resources.Resource | None = None
         # Serializes access to _resource: the UI thread issues writes (setpoint
         # edits, mode changes) while a background thread polls readings, and

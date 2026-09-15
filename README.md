@@ -30,6 +30,21 @@ uv run SqueezeCtrl
 On connect, the app tries to auto-discover the instrument over USB/Ethernet;
 if nothing is found, it falls back to asking for an IP address directly.
 
+## Windows executable
+
+Pushing a version tag (`vX.Y.Z`) builds a standalone `SqueezeCtrl.exe` via
+GitHub Actions and publishes it to the repo's
+[Releases](../../releases) page — no Python install needed to run it.
+
+To build it manually instead, on Windows:
+
+```sh
+uv sync --group build
+uv run pyinstaller SqueezeCtrl.spec
+```
+
+The executable is written to `dist/SqueezeCtrl.exe`.
+
 ## Raw instrument test notebook
 
 `notebooks/instrument_raw_tests.ipynb` exercises the VISA/SCPI commands

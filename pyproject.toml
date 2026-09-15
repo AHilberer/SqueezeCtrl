@@ -19,6 +19,7 @@ notebook = "launch_notebook:main"
 
 [dependency-groups]
 dev = ["jupyter>=1.0.0"]
+build = ["pyinstaller>=6.0"]
 
 [build-system]
 requires = ["hatchling"]
