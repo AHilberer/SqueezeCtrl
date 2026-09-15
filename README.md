@@ -15,7 +15,15 @@ controller over VISA/SCPI (USB or Ethernet).
 - Auto-discover the instrument over USB/Ethernet, or connect by IP
   directly for static-IP Ethernet instruments that don't answer discovery
 
-## Install
+## Download
+
+If you just want to run the app on Windows, no coding tools needed:
+
+1. Go to the [Releases page](../../releases/latest).
+2. Under **Assets**, click `SqueezeCtrl.exe` to download it.
+3. Double-click the downloaded file to run it.
+
+## Install from source
 
 Requires [uv](https://docs.astral.sh/uv/) and Python 3.11+.
 
@@ -32,11 +40,10 @@ uv run SqueezeCtrl
 On connect, the app tries to auto-discover the instrument over USB/Ethernet;
 if nothing is found, it falls back to asking for an IP address directly.
 
-## Windows executable
+## Building the Windows executable
 
-Pushing a version tag (`vX.Y.Z`) builds a standalone `SqueezeCtrl.exe` via
-GitHub Actions and publishes it to the repo's
-[Releases](../../releases) page — no Python install needed to run it.
+Pushing a version tag (`vX.Y.Z`) builds `SqueezeCtrl.exe` via GitHub Actions
+and publishes it to the [Releases page](../../releases) automatically.
 
 To build it manually instead, on Windows:
 
