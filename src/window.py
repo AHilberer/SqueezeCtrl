@@ -15,7 +15,9 @@ from PyQt5.QtCore import (
 )
 from PyQt5.QtGui import QColor, QFont, QFontMetrics, QPainter
 from PyQt5.QtWidgets import (
+    QDockWidget,
     QDoubleSpinBox,
+    QFormLayout,
     QFrame,
     QHBoxLayout,
     QInputDialog,
@@ -23,11 +25,17 @@ from PyQt5.QtWidgets import (
     QMainWindow,
     QMessageBox,
     QPushButton,
+    QSpinBox,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
 
 from .config import (
+    CYCLE_COUNT_DEFAULT,
+    CYCLE_COUNT_MAX,
+    CYCLE_LOWER_DEFAULT,
+    CYCLE_UPPER_DEFAULT,
     DEFAULT_INSTRUMENT_IP,
     POLL_INTERVAL_MS,
     READOUT_DECIMALS,
@@ -46,6 +54,7 @@ from .config import (
     WINDOW_GEOMETRY,
     WINDOW_TITLE,
 )
+from .cycling import CycleController
 from .instrument import ControlMode, InstrumentError, PressureInstrument
 
 logger = logging.getLogger(__name__)
@@ -215,6 +224,12 @@ class MainWindow(QMainWindow):
         self.setGeometry(*WINDOW_GEOMETRY)
 
         self._instrument = PressureInstrument()
+        self._cycle_controller = CycleController(self._instrument)
+        self._cycle_controller.target_changed.connect(self._on_cycle_target_changed)
+        self._cycle_controller.remaining_changed.connect(self._on_cycle_remaining_changed)
+        self._cycle_controller.state_changed.connect(self._on_cycle_state_changed)
+        self._cycle_controller.finished.connect(self._on_cycle_finished)
+        self._cycle_controller.error.connect(self._on_cycle_error)
 
         self._poll_thread = QThread(self)
         self._poll_worker = PollWorker(self._instrument, POLL_INTERVAL_MS)
@@ -250,6 +265,12 @@ class MainWindow(QMainWindow):
         container.setLayout(root)
         self.setCentralWidget(container)
 
+        self._cycle_dock = self._build_cycle_dock()
+        self.addDockWidget(Qt.RightDockWidgetArea, self._cycle_dock)
+        self._cycle_dock.setVisible(False)
+        self._cycle_dock.visibilityChanged.connect(self._cycle_toggle_btn.setChecked)
+        self._update_cycle_controls()
+
     def _build_connection_row(self) -> QHBoxLayout:
         layout = QHBoxLayout()
 
@@ -258,10 +279,83 @@ class MainWindow(QMainWindow):
 
         self._connection_status = QLabel("Status: Disconnected")
 
+        self._cycle_toggle_btn = QToolButton()
+        self._cycle_toggle_btn.setText("↻")
+        self._cycle_toggle_btn.setToolTip("Pressure Cycling")
+        self._cycle_toggle_btn.setCheckable(True)
+        self._cycle_toggle_btn.clicked.connect(self._on_toggle_cycle_dock)
+
         layout.addWidget(self._connect_btn)
         layout.addWidget(self._connection_status)
         layout.addStretch()
+        layout.addWidget(self._cycle_toggle_btn)
         return layout
+
+    def _build_cycle_dock(self) -> QDockWidget:
+        """Side panel with controls for an automated upper/lower pressure cycling sequence."""
+        dock = QDockWidget("Pressure Cycling", self)
+        dock.setAllowedAreas(Qt.LeftDockWidgetArea | Qt.RightDockWidgetArea)
+        dock.setFeatures(QDockWidget.DockWidgetClosable | QDockWidget.DockWidgetMovable)
+
+        sub_font = QFont()
+        sub_font.setPointSize(10)
+
+        def label(text: str) -> QLabel:
+            lbl = QLabel(text)
+            lbl.setFont(sub_font)
+            return lbl
+
+        self._cycle_upper_input = QDoubleSpinBox()
+        self._cycle_upper_input.setDecimals(SETPOINT_DECIMALS)
+        self._cycle_upper_input.setRange(SETPOINT_MIN, SETPOINT_MAX)
+        self._cycle_upper_input.setValue(CYCLE_UPPER_DEFAULT)
+        self._cycle_upper_input.setSuffix(f" {UNIT_PRESSURE}")
+
+        self._cycle_lower_input = QDoubleSpinBox()
+        self._cycle_lower_input.setDecimals(SETPOINT_DECIMALS)
+        self._cycle_lower_input.setRange(SETPOINT_MIN, SETPOINT_MAX)
+        self._cycle_lower_input.setValue(CYCLE_LOWER_DEFAULT)
+        self._cycle_lower_input.setSuffix(f" {UNIT_PRESSURE}")
+
+        self._cycle_count_input = QSpinBox()
+        self._cycle_count_input.setRange(1, CYCLE_COUNT_MAX)
+        self._cycle_count_input.setValue(CYCLE_COUNT_DEFAULT)
+
+        form = QFormLayout()
+        form.addRow(label("Upper Pressure:"), self._cycle_upper_input)
+        form.addRow(label("Lower Pressure:"), self._cycle_lower_input)
+        form.addRow(label("Number of Cycles:"), self._cycle_count_input)
+
+        self._cycle_start_btn = QPushButton("Start")
+        self._cycle_start_btn.clicked.connect(self._on_cycle_start)
+        self._cycle_stop_btn = QPushButton("Stop")
+        self._cycle_stop_btn.clicked.connect(self._on_cycle_stop)
+
+        buttons_row = QHBoxLayout()
+        buttons_row.addWidget(self._cycle_start_btn)
+        buttons_row.addWidget(self._cycle_stop_btn)
+
+        remaining_row = QHBoxLayout()
+        remaining_row.addWidget(label("Remaining Cycles:"))
+        self._cycle_remaining_label = QLabel("—")
+        self._cycle_remaining_label.setFont(sub_font)
+        remaining_row.addWidget(self._cycle_remaining_label)
+        remaining_row.addStretch()
+
+        self._cycle_status_label = label("Idle")
+
+        panel_layout = QVBoxLayout()
+        panel_layout.setSpacing(10)
+        panel_layout.addLayout(form)
+        panel_layout.addLayout(buttons_row)
+        panel_layout.addLayout(remaining_row)
+        panel_layout.addWidget(self._cycle_status_label)
+        panel_layout.addStretch()
+
+        panel = QWidget()
+        panel.setLayout(panel_layout)
+        dock.setWidget(panel)
+        return dock
 
     def _build_mode_switch(self) -> ModeSwitch:
         self._mode_switch = ModeSwitch()
@@ -513,6 +607,7 @@ class MainWindow(QMainWindow):
         self._rate_label.setText(f"{rate:.{READOUT_DECIMALS}f}")
         self._source_pressure_label.setText(f"{source:.{READOUT_DECIMALS}f}")
         self._update_pressure_color(pressure)
+        self._cycle_controller.on_reading(pressure)
 
     def _on_poll_error(self, message: str) -> None:
         logger.warning("Poll failed: %s", message)
@@ -531,6 +626,44 @@ class MainWindow(QMainWindow):
             logger.error("Set slew rate failed: %s", exc)
             QMessageBox.critical(self, "Write Error", str(exc))
 
+    def _on_toggle_cycle_dock(self) -> None:
+        self._cycle_dock.setVisible(self._cycle_toggle_btn.isChecked())
+
+    def _on_cycle_start(self) -> None:
+        upper = self._cycle_upper_input.value()
+        lower = self._cycle_lower_input.value()
+        cycles = self._cycle_count_input.value()
+        try:
+            self._cycle_controller.start(upper, lower, cycles)
+        except ValueError as exc:
+            QMessageBox.warning(self, "Invalid Cycle Parameters", str(exc))
+            return
+        if self._cycle_controller.is_running:
+            self._apply_mode_ui(ControlMode.CONTROL)
+        self._update_cycle_controls()
+
+    def _on_cycle_stop(self) -> None:
+        self._cycle_controller.stop()
+        self._update_cycle_controls()
+
+    def _on_cycle_target_changed(self, target: float) -> None:
+        # Keep the main setpoint display in sync with the active cycling leg.
+        self._setpoint_input.setValue(target)
+
+    def _on_cycle_remaining_changed(self, remaining: int) -> None:
+        self._cycle_remaining_label.setText(str(remaining))
+
+    def _on_cycle_state_changed(self, state: str) -> None:
+        self._cycle_status_label.setText(state)
+
+    def _on_cycle_finished(self) -> None:
+        self._update_cycle_controls()
+
+    def _on_cycle_error(self, message: str) -> None:
+        logger.error("Cycling failed: %s", message)
+        self._update_cycle_controls()
+        QMessageBox.critical(self, "Cycling Error", message)
+
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
@@ -541,12 +674,23 @@ class MainWindow(QMainWindow):
         else:
             self._poll_thread.quit()
             self._poll_thread.wait()
+            self._cycle_controller.stop()
         self._connection_status.setText("Status: Connected" if connected else "Status: Disconnected")
         self._connect_btn.setText("Disconnect" if connected else "Connect")
         self._mode_switch.setEnabled(connected)
         self._setpoint_input.setEnabled(connected)
         self._step_input.setEnabled(connected)
         self._slew_input.setEnabled(connected)
+        self._update_cycle_controls()
+
+    def _update_cycle_controls(self) -> None:
+        running = self._cycle_controller.is_running
+        connected = self._instrument.is_connected
+        self._cycle_start_btn.setEnabled(connected and not running)
+        self._cycle_stop_btn.setEnabled(running)
+        self._cycle_upper_input.setEnabled(not running)
+        self._cycle_lower_input.setEnabled(not running)
+        self._cycle_count_input.setEnabled(not running)
 
     def _update_pressure_color(self, pressure: float) -> None:
         """Colour the pressure label based on proximity to setpoint (control mode only)."""
