@@ -17,20 +17,28 @@ CMD_READ_SOURCE_PRESSURE = ":SOURce:PRESsure:COMPensate1?"
 CMD_SET_PRESSURE = ":SOURce:PRESsure"
 CMD_SET_RATE = ":SOURce:PRESsure:SLEW"
 CMD_SET_OUTPUT = ":OUTP"
+# :SYST:SET? is documented as "only effective at switch-on condition" -- it
+# reports the power-on default mode/setpoint, NOT the instrument's live
+# running state, so a device already in CONTROL mode can still answer this
+# with MEAS. It's only used here to sniff for a compatible controller during
+# resource discovery. For live state, use CMD_QUERY_OUTPUT_STATE / CMD_QUERY_SETPOINT.
 CMD_QUERY_MODE = ":SYST:SET?"
+# Live controller on/off state (0/1), matching the CMD_SET_OUTPUT (:OUTP) write.
+CMD_QUERY_OUTPUT_STATE = ":OUTPut:STATe?"
+# Live commanded setpoint, matching the CMD_SET_PRESSURE (:SOUR:PRES) write.
+CMD_QUERY_SETPOINT = ":SOURce:PRESsure?"
 # Readback of the configured target slew rate (the :SOURce: register CMD_SET_RATE
 # writes to), as opposed to CMD_READ_RATE which is the live/actual slew under
-# :SENSe:. Not yet exercised against real hardware -- verify with the raw test
-# notebook before relying on it.
+# :SENSe:.
 CMD_READ_CONFIGURED_RATE = ":SOURce:PRESsure:SLEW?"
 CMD_QUERY_UNIT = ":UNIT:PRESsure?"
 
-# Per the GE Druck PACE SCPI manual (K0472, section 4, ":SOUR:PRES:SLEW" /
-# ":SENS:PRES:SLEW?"), slew rate is always in the instrument's currently
-# selected pressure unit PER SECOND, not per minute. The app displays and
-# accepts Bar/min (UNIT_RATE below), so instrument.py converts at the wire
-# boundary using this factor.
-RATE_SECONDS_PER_MINUTE = 60.0
+# The GE Druck PACE SCPI manual (K0472, ":SOUR:PRES:SLEW" / ":SENS:PRES:SLEW?")
+# documents slew rate as being in the instrument's pressure unit PER SECOND.
+# Verified against real hardware: this is wrong for this instrument -- setting
+# 10 bar/min on the front panel and reading CMD_READ_CONFIGURED_RATE back
+# raw gives 10, not 10/60. The register already matches the front panel's
+# Bar/min directly, so no time-base conversion is applied in instrument.py.
 
 # This app assumes the instrument's own pressure-unit setting (front panel /
 # :UNIT:PRES) is BAR, and doesn't convert pressure/setpoint values for any
