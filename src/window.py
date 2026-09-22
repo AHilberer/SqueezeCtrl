@@ -225,6 +225,9 @@ class MainWindow(QMainWindow):
         self.setGeometry(*WINDOW_GEOMETRY)
 
         self._instrument = PressureInstrument()
+        # True while control has been explicitly released to the front panel
+        # (polling paused, instrument sent :LOC) -- see _on_toggle_local_release.
+        self._local_release_active = False
         self._cycle_controller = CycleController(self._instrument)
         self._cycle_controller.target_changed.connect(self._on_cycle_target_changed)
         self._cycle_controller.remaining_changed.connect(self._on_cycle_remaining_changed)
@@ -278,6 +281,19 @@ class MainWindow(QMainWindow):
         self._connect_btn = QPushButton("Connect")
         self._connect_btn.clicked.connect(self._on_connect)
 
+        # Emergency hand-off to the instrument's own front panel. The device
+        # re-arms remote lockout on almost any SCPI command (including a
+        # routine poll read), so the front panel's own "local" control can
+        # never reliably win that race on its own -- this pauses all app
+        # traffic and explicitly releases control instead.
+        self._local_release_btn = QPushButton("Release to Local")
+        self._local_release_btn.setEnabled(False)
+        self._local_release_btn.setStyleSheet(
+            "QPushButton { background-color: #e07b39; color: white; } "
+            "QPushButton:disabled { background-color: none; color: gray; }"
+        )
+        self._local_release_btn.clicked.connect(self._on_toggle_local_release)
+
         self._connection_status = QLabel("Status: Disconnected")
 
         self._cycle_toggle_btn = QToolButton()
@@ -287,6 +303,7 @@ class MainWindow(QMainWindow):
         self._cycle_toggle_btn.clicked.connect(self._on_toggle_cycle_dock)
 
         layout.addWidget(self._connect_btn)
+        layout.addWidget(self._local_release_btn)
         layout.addWidget(self._connection_status)
         layout.addStretch()
         layout.addWidget(self._cycle_toggle_btn)
@@ -538,49 +555,57 @@ class MainWindow(QMainWindow):
 
             self._instrument.connect(address)
             self._set_connected_state(True)
-            # This app only interprets values in bar (and bar/min for rate); if
-            # the instrument's own unit setting has been changed to something
-            # else (its front panel, or a previous SCPI session), every value
-            # we read/write below would be silently misinterpreted. Warn loudly
-            # rather than guess at a conversion.
-            try:
-                unit = self._instrument.read_pressure_unit()
-                if unit != EXPECTED_PRESSURE_UNIT:
-                    logger.error(
-                        "Instrument pressure unit is %s, not %s", unit, EXPECTED_PRESSURE_UNIT
-                    )
-                    QMessageBox.warning(
-                        self,
-                        "Unit Mismatch",
-                        f"This instrument is currently set to {unit}, but this "
-                        f"application only supports {EXPECTED_PRESSURE_UNIT}.\n\n"
-                        "All pressure, setpoint, and rate values shown or sent "
-                        "by this app will be misinterpreted until you change the "
-                        f"instrument's own unit setting to {EXPECTED_PRESSURE_UNIT} "
-                        "(front panel or :UNIT:PRES).",
-                    )
-            except InstrumentError as exc:
-                logger.warning("Could not read instrument pressure unit: %s", exc)
-            # Read initial mode from instrument
-            try:
-                mode = self._instrument.read_mode()
-                self._apply_mode_ui(mode)
-            except InstrumentError as exc:
-                logger.warning("Could not read initial mode: %s", exc)
-            # Sync setpoint/rate to the device's actual configured values,
-            # instead of leaving the spinboxes at their in-app defaults.
-            try:
-                self._setpoint_input.setValue(self._instrument.read_setpoint())
-            except InstrumentError as exc:
-                logger.warning("Could not read initial setpoint: %s", exc)
-            try:
-                self._slew_input.setValue(self._instrument.read_configured_rate())
-            except InstrumentError as exc:
-                logger.warning("Could not read initial slew rate: %s", exc)
+            self._sync_ui_from_instrument()
             self._connection_status.setText("Status: Connected")
         except InstrumentError as exc:
             logger.error("Connection failed: %s", exc)
             QMessageBox.critical(self, "Connection Error", str(exc))
+
+    def _sync_ui_from_instrument(self) -> None:
+        """Pull the instrument's live unit/mode/setpoint/rate into the GUI.
+
+        Used both right after connecting and after resuming from a local-control
+        release, since the operator may have changed the mode/setpoint/rate from
+        the front panel while the instrument was released to local.
+        """
+        # This app only interprets values in bar (and bar/min for rate); if
+        # the instrument's own unit setting has been changed to something
+        # else (its front panel, or a previous SCPI session), every value
+        # we read/write below would be silently misinterpreted. Warn loudly
+        # rather than guess at a conversion.
+        try:
+            unit = self._instrument.read_pressure_unit()
+            if unit != EXPECTED_PRESSURE_UNIT:
+                logger.error(
+                    "Instrument pressure unit is %s, not %s", unit, EXPECTED_PRESSURE_UNIT
+                )
+                QMessageBox.warning(
+                    self,
+                    "Unit Mismatch",
+                    f"This instrument is currently set to {unit}, but this "
+                    f"application only supports {EXPECTED_PRESSURE_UNIT}.\n\n"
+                    "All pressure, setpoint, and rate values shown or sent "
+                    "by this app will be misinterpreted until you change the "
+                    f"instrument's own unit setting to {EXPECTED_PRESSURE_UNIT} "
+                    "(front panel or :UNIT:PRES).",
+                )
+        except InstrumentError as exc:
+            logger.warning("Could not read instrument pressure unit: %s", exc)
+        try:
+            mode = self._instrument.read_mode()
+            self._apply_mode_ui(mode)
+        except InstrumentError as exc:
+            logger.warning("Could not read initial mode: %s", exc)
+        # Sync setpoint/rate to the device's actual configured values,
+        # instead of leaving the spinboxes at their previous/in-app-default values.
+        try:
+            self._setpoint_input.setValue(self._instrument.read_setpoint())
+        except InstrumentError as exc:
+            logger.warning("Could not read initial setpoint: %s", exc)
+        try:
+            self._slew_input.setValue(self._instrument.read_configured_rate())
+        except InstrumentError as exc:
+            logger.warning("Could not read initial slew rate: %s", exc)
 
     def _resolve_address(self) -> str | None:
         """Pick the VISA address to connect to: an auto-recognized instrument,
@@ -722,11 +747,66 @@ class MainWindow(QMainWindow):
         self._setpoint_input.setEnabled(connected)
         self._step_input.setEnabled(connected)
         self._slew_input.setEnabled(connected)
+        self._local_release_btn.setEnabled(connected)
+        self._local_release_btn.setText("Release to Local")
+        self._local_release_active = False
+        self._update_cycle_controls()
+
+    def _on_toggle_local_release(self) -> None:
+        if not self._instrument.is_connected:
+            return
+        if self._local_release_active:
+            self._resume_remote_control()
+        else:
+            self._release_to_local()
+
+    def _release_to_local(self) -> None:
+        # Stop everything that could send a command before releasing -- any
+        # further traffic, including a routine poll read, re-arms remote
+        # lockout and disables the front panel again.
+        if self._poll_thread.isRunning():
+            self._poll_thread.quit()
+            self._poll_thread.wait()
+        self._cycle_controller.stop()
+        self._update_cycle_controls()
+        self._mode_switch.setEnabled(False)
+        self._setpoint_input.setEnabled(False)
+        self._step_input.setEnabled(False)
+        self._slew_input.setEnabled(False)
+        try:
+            self._instrument.go_to_local()
+        except InstrumentError as exc:
+            logger.error("Failed to release instrument to local control: %s", exc)
+            QMessageBox.critical(self, "Release Error", str(exc))
+            # Couldn't actually hand off control -- resume polling rather than
+            # leave the app looking paused while still silently in charge.
+            self._poll_thread.start()
+            self._mode_switch.setEnabled(True)
+            self._setpoint_input.setEnabled(True)
+            self._step_input.setEnabled(True)
+            self._slew_input.setEnabled(True)
+            return
+        self._local_release_active = True
+        self._local_release_btn.setText("Resume Remote Control")
+        self._connection_status.setText("Status: Released to local control")
+
+    def _resume_remote_control(self) -> None:
+        self._local_release_active = False
+        self._local_release_btn.setText("Release to Local")
+        self._poll_thread.start()
+        self._mode_switch.setEnabled(True)
+        self._setpoint_input.setEnabled(True)
+        self._step_input.setEnabled(True)
+        self._slew_input.setEnabled(True)
+        # The operator may have changed mode/setpoint/rate from the front
+        # panel while released -- re-sync rather than trust stale GUI values.
+        self._sync_ui_from_instrument()
+        self._connection_status.setText("Status: Connected")
         self._update_cycle_controls()
 
     def _update_cycle_controls(self) -> None:
         running = self._cycle_controller.is_running
-        connected = self._instrument.is_connected
+        connected = self._instrument.is_connected and not self._local_release_active
         self._cycle_start_btn.setEnabled(connected and not running)
         self._cycle_stop_btn.setEnabled(running)
         self._cycle_upper_input.setEnabled(not running)
