@@ -520,7 +520,14 @@ class MainWindow(QMainWindow):
 
     def _on_connect(self) -> None:
         if self._instrument.is_connected:
+            # Stop polling first -- _set_connected_state(False) blocks until the
+            # poll thread has actually quit, so go_to_local() below is guaranteed
+            # to be the last command sent, not immediately undone by a poll read.
             self._set_connected_state(False)
+            try:
+                self._instrument.go_to_local()
+            except InstrumentError as exc:
+                logger.warning("Could not release instrument to local control: %s", exc)
             self._instrument.disconnect()
             return
 
@@ -740,6 +747,11 @@ class MainWindow(QMainWindow):
         if self._poll_thread.isRunning():
             self._poll_thread.quit()
             self._poll_thread.wait()
+        if self._instrument.is_connected:
+            try:
+                self._instrument.go_to_local()
+            except InstrumentError as exc:
+                logger.warning("Could not release instrument to local control: %s", exc)
         self._instrument.disconnect()
         event.accept()
 

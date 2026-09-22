@@ -7,6 +7,7 @@ from enum import Enum
 import pyvisa
 
 from .config import (
+    CMD_GOTO_LOCAL,
     CMD_QUERY_MODE,
     CMD_QUERY_OUTPUT_STATE,
     CMD_QUERY_SETPOINT,
@@ -96,6 +97,17 @@ class PressureInstrument:
                 logger.warning("Error while closing instrument: %s", exc)
             finally:
                 self._resource = None
+
+    def go_to_local(self) -> None:
+        """Release the instrument back to local/front-panel control (:LOC).
+
+        Callers must stop polling (and any other periodic command) before
+        calling this and disconnect right after -- any further command,
+        including a routine poll read, re-arms remote lockout and disables
+        the front panel again. See CMD_GOTO_LOCAL in config.py.
+        """
+        self._write(CMD_GOTO_LOCAL)
+        logger.info("Released instrument to local control")
 
     def read_pressure(self) -> float:
         """Return the current output pressure in Bar."""

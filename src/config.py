@@ -32,6 +32,12 @@ CMD_QUERY_SETPOINT = ":SOURce:PRESsure?"
 # :SENSe:.
 CMD_READ_CONFIGURED_RATE = ":SOURce:PRESsure:SLEW?"
 CMD_QUERY_UNIT = ":UNIT:PRESsure?"
+# Releases the instrument back to local/front-panel control (manual p.4-75).
+# Per the manual's "Remote/Local Operation" section, almost any other SCPI
+# command -- including a background poll's reads -- re-arms remote lockout
+# and disables the front-panel touch-screen again, so this must be the last
+# command sent before disconnecting, with polling already stopped.
+CMD_GOTO_LOCAL = ":LOC"
 
 # The GE Druck PACE SCPI manual (K0472, ":SOUR:PRES:SLEW" / ":SENS:PRES:SLEW?")
 # documents slew rate as being in the instrument's pressure unit PER SECOND.
