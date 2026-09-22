@@ -743,14 +743,18 @@ class MainWindow(QMainWindow):
             self._cycle_controller.stop()
         self._connection_status.setText("Status: Connected" if connected else "Status: Disconnected")
         self._connect_btn.setText("Disconnect" if connected else "Connect")
-        self._mode_switch.setEnabled(connected)
-        self._setpoint_input.setEnabled(connected)
-        self._step_input.setEnabled(connected)
-        self._slew_input.setEnabled(connected)
+        self._set_remote_controls_enabled(connected)
         self._local_release_btn.setEnabled(connected)
         self._local_release_btn.setText("Release to Local")
         self._local_release_active = False
         self._update_cycle_controls()
+
+    def _set_remote_controls_enabled(self, enabled: bool) -> None:
+        """Enable/disable the widgets that can send a write to the instrument."""
+        self._mode_switch.setEnabled(enabled)
+        self._setpoint_input.setEnabled(enabled)
+        self._step_input.setEnabled(enabled)
+        self._slew_input.setEnabled(enabled)
 
     def _on_toggle_local_release(self) -> None:
         if not self._instrument.is_connected:
@@ -768,11 +772,7 @@ class MainWindow(QMainWindow):
             self._poll_thread.quit()
             self._poll_thread.wait()
         self._cycle_controller.stop()
-        self._update_cycle_controls()
-        self._mode_switch.setEnabled(False)
-        self._setpoint_input.setEnabled(False)
-        self._step_input.setEnabled(False)
-        self._slew_input.setEnabled(False)
+        self._set_remote_controls_enabled(False)
         try:
             self._instrument.go_to_local()
         except InstrumentError as exc:
@@ -781,23 +781,22 @@ class MainWindow(QMainWindow):
             # Couldn't actually hand off control -- resume polling rather than
             # leave the app looking paused while still silently in charge.
             self._poll_thread.start()
-            self._mode_switch.setEnabled(True)
-            self._setpoint_input.setEnabled(True)
-            self._step_input.setEnabled(True)
-            self._slew_input.setEnabled(True)
+            self._set_remote_controls_enabled(True)
+            self._update_cycle_controls()
             return
         self._local_release_active = True
         self._local_release_btn.setText("Resume Remote Control")
         self._connection_status.setText("Status: Released to local control")
+        # Must run after _local_release_active is set, since it gates whether
+        # cycling can be (re)started -- it must not be while released, as
+        # starting one would immediately write a setpoint to the instrument.
+        self._update_cycle_controls()
 
     def _resume_remote_control(self) -> None:
         self._local_release_active = False
         self._local_release_btn.setText("Release to Local")
         self._poll_thread.start()
-        self._mode_switch.setEnabled(True)
-        self._setpoint_input.setEnabled(True)
-        self._step_input.setEnabled(True)
-        self._slew_input.setEnabled(True)
+        self._set_remote_controls_enabled(True)
         # The operator may have changed mode/setpoint/rate from the front
         # panel while released -- re-sync rather than trust stale GUI values.
         self._sync_ui_from_instrument()

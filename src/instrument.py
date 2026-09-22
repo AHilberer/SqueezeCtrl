@@ -102,7 +102,8 @@ class PressureInstrument:
         """Release the instrument back to local/front-panel control (:LOC).
 
         Callers must stop polling (and any other periodic command) before
-        calling this and disconnect right after -- any further command,
+        calling this, and must not send anything else afterwards -- whether
+        or not the VISA connection itself stays open -- any further command,
         including a routine poll read, re-arms remote lockout and disables
         the front panel again. See CMD_GOTO_LOCAL in config.py.
         """
