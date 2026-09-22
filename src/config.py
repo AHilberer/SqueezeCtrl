@@ -18,6 +18,27 @@ CMD_SET_PRESSURE = ":SOURce:PRESsure"
 CMD_SET_RATE = ":SOURce:PRESsure:SLEW"
 CMD_SET_OUTPUT = ":OUTP"
 CMD_QUERY_MODE = ":SYST:SET?"
+# Readback of the configured target slew rate (the :SOURce: register CMD_SET_RATE
+# writes to), as opposed to CMD_READ_RATE which is the live/actual slew under
+# :SENSe:. Not yet exercised against real hardware -- verify with the raw test
+# notebook before relying on it.
+CMD_READ_CONFIGURED_RATE = ":SOURce:PRESsure:SLEW?"
+CMD_QUERY_UNIT = ":UNIT:PRESsure?"
+
+# Per the GE Druck PACE SCPI manual (K0472, section 4, ":SOUR:PRES:SLEW" /
+# ":SENS:PRES:SLEW?"), slew rate is always in the instrument's currently
+# selected pressure unit PER SECOND, not per minute. The app displays and
+# accepts Bar/min (UNIT_RATE below), so instrument.py converts at the wire
+# boundary using this factor.
+RATE_SECONDS_PER_MINUTE = 60.0
+
+# This app assumes the instrument's own pressure-unit setting (front panel /
+# :UNIT:PRES) is BAR, and doesn't convert pressure/setpoint values for any
+# other unit -- the instrument can be set to mbar, psi, kPa, etc. by the user
+# independently of this app, which would silently misinterpret every
+# pressure/setpoint/rate value exchanged. read_pressure_unit() lets callers
+# check this and warn instead of guessing at a conversion.
+EXPECTED_PRESSURE_UNIT = "BAR"
 
 # Units
 UNIT_PRESSURE = "bar"

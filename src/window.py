@@ -37,6 +37,7 @@ from .config import (
     CYCLE_LOWER_DEFAULT,
     CYCLE_UPPER_DEFAULT,
     DEFAULT_INSTRUMENT_IP,
+    EXPECTED_PRESSURE_UNIT,
     POLL_INTERVAL_MS,
     READOUT_DECIMALS,
     SETPOINT_DECIMALS,
@@ -530,12 +531,45 @@ class MainWindow(QMainWindow):
 
             self._instrument.connect(address)
             self._set_connected_state(True)
+            # This app only interprets values in bar (and bar/min for rate); if
+            # the instrument's own unit setting has been changed to something
+            # else (its front panel, or a previous SCPI session), every value
+            # we read/write below would be silently misinterpreted. Warn loudly
+            # rather than guess at a conversion.
+            try:
+                unit = self._instrument.read_pressure_unit()
+                if unit != EXPECTED_PRESSURE_UNIT:
+                    logger.error(
+                        "Instrument pressure unit is %s, not %s", unit, EXPECTED_PRESSURE_UNIT
+                    )
+                    QMessageBox.warning(
+                        self,
+                        "Unit Mismatch",
+                        f"This instrument is currently set to {unit}, but this "
+                        f"application only supports {EXPECTED_PRESSURE_UNIT}.\n\n"
+                        "All pressure, setpoint, and rate values shown or sent "
+                        "by this app will be misinterpreted until you change the "
+                        f"instrument's own unit setting to {EXPECTED_PRESSURE_UNIT} "
+                        "(front panel or :UNIT:PRES).",
+                    )
+            except InstrumentError as exc:
+                logger.warning("Could not read instrument pressure unit: %s", exc)
             # Read initial mode from instrument
             try:
                 mode = self._instrument.read_mode()
                 self._apply_mode_ui(mode)
             except InstrumentError as exc:
                 logger.warning("Could not read initial mode: %s", exc)
+            # Sync setpoint/rate to the device's actual configured values,
+            # instead of leaving the spinboxes at their in-app defaults.
+            try:
+                self._setpoint_input.setValue(self._instrument.read_setpoint())
+            except InstrumentError as exc:
+                logger.warning("Could not read initial setpoint: %s", exc)
+            try:
+                self._slew_input.setValue(self._instrument.read_configured_rate())
+            except InstrumentError as exc:
+                logger.warning("Could not read initial slew rate: %s", exc)
             self._connection_status.setText("Status: Connected")
         except InstrumentError as exc:
             logger.error("Connection failed: %s", exc)

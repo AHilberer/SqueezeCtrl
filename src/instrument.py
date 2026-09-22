@@ -8,6 +8,8 @@ import pyvisa
 
 from .config import (
     CMD_QUERY_MODE,
+    CMD_QUERY_UNIT,
+    CMD_READ_CONFIGURED_RATE,
     CMD_READ_PRESSURE,
     CMD_READ_RATE,
     CMD_READ_SOURCE_PRESSURE,
@@ -15,6 +17,7 @@ from .config import (
     CMD_SET_PRESSURE,
     CMD_SET_RATE,
     INSTRUMENT_TIMEOUT_MS,
+    RATE_SECONDS_PER_MINUTE,
 )
 
 logger = logging.getLogger(__name__)
@@ -98,8 +101,12 @@ class PressureInstrument:
         return self._query_float(CMD_READ_PRESSURE)
 
     def read_rate(self) -> float:
-        """Return the current output slew rate in Bar/min."""
-        return self._query_float(CMD_READ_RATE)
+        """Return the current output slew rate in Bar/min.
+
+        The instrument reports this in Bar/second (CMD_READ_RATE), so the
+        value is scaled up by RATE_SECONDS_PER_MINUTE here.
+        """
+        return self._query_float(CMD_READ_RATE) * RATE_SECONDS_PER_MINUTE
 
     def read_source_pressure(self) -> float:
         """Return the positive source pressure (Bar)."""
@@ -107,15 +114,61 @@ class PressureInstrument:
 
     def read_mode(self) -> ControlMode:
         """Query the current operating mode (MEASURE or CONTROL)."""
+        raw = self._query_mode_response()
+        upper = raw.upper()
+        if "CONT" in upper:
+            return ControlMode.CONTROL
+        return ControlMode.MEASURE
+
+    def read_setpoint(self) -> float:
+        """Query the instrument's configured setpoint (Bar).
+
+        Reuses the mode query response, which already carries the setpoint
+        as its second field: ":SYST:SET MEAS, 0.0" / ":SYST:SET CONT, 100.0".
+        """
+        raw = self._query_mode_response()
+        tokens = raw.replace(",", " ").split()
+        try:
+            return float(tokens[-1])
+        except (ValueError, IndexError) as exc:
+            raise InstrumentError(
+                f"Unexpected response to {CMD_QUERY_MODE!r}: {raw!r} ({exc})"
+            ) from exc
+
+    def read_configured_rate(self) -> float:
+        """Query the instrument's configured target slew rate (Bar/min).
+
+        Distinct from read_rate(), which reads the live/actual slew under
+        :SENSe:. This reads back the :SOURce: register that set_rate() writes,
+        converted from the instrument's Bar/second to Bar/min like read_rate().
+        """
+        return self._query_float(CMD_READ_CONFIGURED_RATE) * RATE_SECONDS_PER_MINUTE
+
+    def read_pressure_unit(self) -> str:
+        """Query the instrument's currently selected pressure unit (e.g. "BAR",
+        "MBAR", "PSI"; see :UNIT:PRES in the SCPI manual for the full list).
+
+        This app assumes/only supports EXPECTED_PRESSURE_UNIT ("BAR") for every
+        other pressure/rate value it reads or writes; callers should check this
+        against that and warn rather than silently mis-scale readings, since no
+        verified conversion-factor table exists here for the other units.
+        """
         resource = self._assert_connected()
         try:
             with self._io_lock:
-                raw = resource.query(CMD_QUERY_MODE).strip()
-            # Response format: ":SYST:SET MEAS, 0.0" or ":SYST:SET CONT, 100.0"
-            upper = raw.upper()
-            if "CONT" in upper:
-                return ControlMode.CONTROL
-            return ControlMode.MEASURE
+                raw = resource.query(CMD_QUERY_UNIT).strip()
+        except pyvisa.VisaIOError as exc:
+            raise InstrumentError(f"Unit query failed: {exc}") from exc
+        tokens = raw.split()
+        if not tokens:
+            raise InstrumentError(f"Empty response to {CMD_QUERY_UNIT!r}")
+        return tokens[-1].upper()
+
+    def _query_mode_response(self) -> str:
+        resource = self._assert_connected()
+        try:
+            with self._io_lock:
+                return resource.query(CMD_QUERY_MODE).strip()
         except pyvisa.VisaIOError as exc:
             raise InstrumentError(f"Mode query failed: {exc}") from exc
 
@@ -135,8 +188,11 @@ class PressureInstrument:
         self._write(f"{CMD_SET_PRESSURE} {value}")
 
     def set_rate(self, value: float) -> None:
-        """Send the slew rate (Bar/min) to the instrument."""
-        self._write(f"{CMD_SET_RATE} {value}")
+        """Send the slew rate (Bar/min) to the instrument.
+
+        Converted to Bar/second on the wire; see read_rate() for why.
+        """
+        self._write(f"{CMD_SET_RATE} {value / RATE_SECONDS_PER_MINUTE}")
 
     # ------------------------------------------------------------------
     # Private helpers
