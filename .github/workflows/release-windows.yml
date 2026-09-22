@@ -20,6 +20,10 @@ jobs:
       - name: Sync dependencies
         run: uv sync --no-dev --group build
 
+      - name: Stamp version
+        shell: bash
+        run: echo "__version__ = \"${GITHUB_REF_NAME}\"" > src/_version.py
+
       - name: Build executable
         run: uv run pyinstaller SqueezeCtrl.spec
 

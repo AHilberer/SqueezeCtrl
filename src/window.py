@@ -55,6 +55,7 @@ from .config import (
     WINDOW_GEOMETRY,
     WINDOW_TITLE,
 )
+from ._version import __version__
 from .cycling import CycleController
 from .instrument import ControlMode, InstrumentError, PressureInstrument
 
@@ -274,6 +275,10 @@ class MainWindow(QMainWindow):
         self._cycle_dock.setVisible(False)
         self._cycle_dock.visibilityChanged.connect(self._cycle_toggle_btn.setChecked)
         self._update_cycle_controls()
+
+        version_label = QLabel(__version__)
+        version_label.setStyleSheet("color: gray;")
+        self.statusBar().addPermanentWidget(version_label)
 
     def _build_connection_row(self) -> QHBoxLayout:
         layout = QHBoxLayout()
